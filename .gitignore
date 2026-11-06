@@ -1,0 +1,15 @@
+bin/
+obj/
+.vs/
+.idea/
+*.user
+.env
+*.tfstate
+*.tfstate.*
+.terraform/
+*.tfvars
+backend.hcl
+local.settings.json
+TestResults/
+*.out
+*.err

@@ -1,0 +1,8 @@
+# One line-ending convention for everyone: LF in the repository and in working copies, on Windows too.
+* text=auto eol=lf
+
+*.ps1   text eol=lf
+*.sh    text eol=lf
+*.png   binary
+*.jpg   binary
+*.svg   text
