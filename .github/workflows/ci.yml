@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  # Superseded pull request runs are cancelled to save minutes. On main every commit keeps its own result.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - uses: actions/cache@v6
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Restore
+        run: dotnet restore Shorty.slnx
+
+      # Whitespace, indentation, line endings and charset, as configured in .editorconfig.
+      - name: Check formatting
+        run: dotnet format whitespace Shorty.slnx --verify-no-changes --no-restore
+
+      - name: Build (warnings are errors)
+        run: dotnet build Shorty.slnx --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test Shorty.slnx --configuration Release --no-build

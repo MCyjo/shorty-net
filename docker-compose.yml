@@ -1,0 +1,45 @@
+name: shorty
+
+# Local infrastructure. Host ports differ from the PayFlow project's compose file, so both can run side by side.
+# Copy .env.example to .env before `docker compose up`.
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: shorty
+      POSTGRES_DB: shorty
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shorty -d shorty"]
+      interval: 5s
+      retries: 10
+
+  # A cache, not a database: no persistence, bounded memory, least-recently-used eviction. Anything lost is rebuilt
+  # from PostgreSQL on the next request (see docs/adr/0001-redis-in-a-container.md).
+  redis:
+    image: redis:7.2-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 10
+
+  aspire-dashboard:
+    image: mcr.microsoft.com/dotnet/aspire-dashboard:latest
+    environment:
+      DASHBOARD__FRONTEND__AUTHMODE: Unsecured
+      DASHBOARD__OTLP__AUTHMODE: Unsecured
+      DASHBOARD__API__ENABLED: "true"           # lets tests and scripts read traces back
+      DASHBOARD__API__AUTHMODE: Unsecured
+    ports:
+      - "18890:18888"   # UI
+      - "4327:18889"    # OTLP gRPC
+
+volumes:
+  pgdata:

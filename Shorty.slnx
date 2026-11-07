@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Shorty.Api/Shorty.Api.csproj" />
+    <Project Path="src/Shorty.ServiceDefaults/Shorty.ServiceDefaults.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Shorty.Api.Tests/Shorty.Api.Tests.csproj" />
+  </Folder>
+</Solution>

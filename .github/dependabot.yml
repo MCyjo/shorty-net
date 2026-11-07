@@ -1,0 +1,20 @@
+version: 2
+updates:
+  - package-ecosystem: nuget
+    directory: /
+    schedule: { interval: weekly }
+    groups:
+      opentelemetry:
+        patterns: ["OpenTelemetry*"]
+      # Test tooling moves in lockstep across every test project: one pull request, one CI run.
+      test-tooling:
+        patterns: ["Microsoft.NET.Test.Sdk", "xunit*"]
+    ignore:
+      # Only came with the xunit template; nothing collects coverage.
+      - dependency-name: "coverlet.collector"
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }
+    groups:
+      github-actions:
+        patterns: ["*"]
