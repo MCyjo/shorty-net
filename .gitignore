@@ -13,3 +13,5 @@ local.settings.json
 TestResults/
 *.out
 *.err
+artifacts/
+loadtest/results/*.json

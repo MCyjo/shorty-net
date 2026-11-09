@@ -40,9 +40,13 @@ builder.Services.AddSingleton<IConnectionMultiplexer>(_ => ConnectionMultiplexer
 // Two layers: each instance's memory (L1) and Redis shared by all instances (L2). HybridCache also makes concurrent requests
 // for the same missing key share one database read. L2 reuses the multiplexer above instead of opening a second connection.
 builder.Services.Configure<CacheSettings>(builder.Configuration.GetSection(CacheSettings.Section));
-builder.Services.AddOptions<RedisCacheOptions>()
-    .Configure<IConnectionMultiplexer>((options, multiplexer) => options.ConnectionMultiplexerFactory = () => Task.FromResult(multiplexer));
-builder.Services.AddStackExchangeRedisCache(_ => { });
+// Redis stays connected in every mode (the readiness check reports it), but only Hybrid uses it as the second layer.
+if (builder.Configuration.GetValue("Cache:Mode", CacheMode.Hybrid) == CacheMode.Hybrid)
+{
+    builder.Services.AddOptions<RedisCacheOptions>()
+        .Configure<IConnectionMultiplexer>((options, multiplexer) => options.ConnectionMultiplexerFactory = () => Task.FromResult(multiplexer));
+    builder.Services.AddStackExchangeRedisCache(_ => { });
+}
 builder.Services.AddHybridCache();
 builder.Services.AddSingleton<LinkCache>();
 

@@ -5,9 +5,24 @@ using Shorty.Core;
 
 namespace Shorty.Api.Caching;
 
+/// <summary>Which cache layers are used. Only meant to be changed for comparisons (load tests); production runs <see cref="Hybrid"/>.</summary>
+public enum CacheMode
+{
+    /// <summary>Memory of each instance, then Redis shared by all, then PostgreSQL.</summary>
+    Hybrid,
+
+    /// <summary>Memory of each instance only; Redis is not used for links.</summary>
+    MemoryOnly,
+
+    /// <summary>No cache: every redirect reads PostgreSQL.</summary>
+    None,
+}
+
 public sealed class CacheSettings
 {
     public const string Section = "Cache";
+
+    public CacheMode Mode { get; set; } = CacheMode.Hybrid;
 
     /// <summary>How long a link stays in Redis (the shared layer).</summary>
     public TimeSpan Ttl { get; set; } = TimeSpan.FromHours(1);
@@ -52,6 +67,14 @@ internal sealed partial class LinkCache(
     public async Task<CachedLink> GetAsync(string code, CancellationToken ct)
     {
         var options = settings.Value;
+
+        if (options.Mode == CacheMode.None)
+        {
+            ShortyMetrics.CacheMisses.Add(1);
+            var found = await store.FindAsync(code, ct);
+            return found is null ? CachedLink.Missing : new CachedLink(found.Url, found.ExpiresAt);
+        }
+
         var load = new Load(code, store);
 
         var link = await cache.GetOrCreateAsync(

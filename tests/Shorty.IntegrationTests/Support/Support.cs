@@ -55,6 +55,9 @@ public sealed class RedisFixture : IAsyncLifetime
 
     public Task FlushAsync() => _container.ExecAsync(["redis-cli", "FLUSHALL"]);
 
+    public async Task<long> KeyCountAsync() =>
+        long.Parse((await _container.ExecAsync(["redis-cli", "DBSIZE"])).Stdout.Trim(), System.Globalization.CultureInfo.InvariantCulture);
+
     /// <summary>Makes Redis accept connections but stop answering for a while, like a server that is overloaded.</summary>
     public Task PauseAsync(TimeSpan duration) =>
         _container.ExecAsync(["redis-cli", "CLIENT", "PAUSE", ((int)duration.TotalMilliseconds).ToString(System.Globalization.CultureInfo.InvariantCulture), "ALL"]);

@@ -1,0 +1,57 @@
+name: shortyload
+
+# An isolated stack for load tests: fresh data on every run, fixed resource limits, nothing shared with the development compose
+# file. Everything the API depends on runs on the same Docker network as the load generator, so no traffic crosses the host.
+# Run it with loadtest/run.sh, not by hand.
+services:
+  postgres:
+    image: postgres:17
+    command: ["postgres", "-c", "max_connections=200"]
+    environment:
+      POSTGRES_USER: shorty
+      POSTGRES_DB: shorty
+      POSTGRES_PASSWORD: loadtest-only
+    # Memory-backed data directory: removes disk speed as a variable, and everything is gone at "down". Not a durability test.
+    tmpfs:
+      - /var/lib/postgresql/data
+    cpus: 2
+    mem_limit: 2g
+
+  redis:
+    image: redis:7.2-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    cpus: 1
+    mem_limit: 512m
+
+  api:
+    image: shorty-api:local
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__Postgres: "Host=postgres;Database=shorty;Username=shorty;Password=loadtest-only;Maximum Pool Size=50;Timeout=5"
+      ConnectionStrings__Redis: "redis:6379,abortConnect=false,connectTimeout=2000"
+      CodeGeneration__Seed: "20260507"
+      Database__MigrateOnStartup: "true"
+      Logging__LogLevel__Default: Warning        # the cost of logging every request is not what is being measured
+      Logging__LogLevel__Microsoft.AspNetCore: Warning
+      Cache__Mode: ${CACHE_MODE:-Hybrid}
+      RateLimiting__Enabled: ${RATE_LIMITING:-false}
+      RateLimiting__Redirect__Limit: ${REDIRECT_LIMIT:-600}
+    ports:
+      - "18080:8080"     # only for the readiness poll of the runner script
+    cpus: 2
+    mem_limit: 1g
+    depends_on:
+      - postgres
+      - redis
+
+  k6:
+    image: grafana/k6:latest
+    profiles: ["k6"]
+    entrypoint: ["k6"]
+    user: root          # so it can write the result files into the mounted folder; a throwaway load generator
+    environment:
+      BASE_URL: http://api:8080
+    volumes:
+      - ./:/loadtest
+    cpus: 6
+    mem_limit: 2g

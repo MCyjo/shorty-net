@@ -199,4 +199,46 @@ public sealed class CacheTests(PostgresFixture postgres, RedisFixture redis)
         Assert.True(timer.Elapsed < TimeSpan.FromSeconds(2.5), $"the redirect took {timer.Elapsed.TotalSeconds:0.0} s while Redis was unresponsive");
         await Task.Delay(TimeSpan.FromSeconds(8)); // let the pause end before the next test uses this Redis
     }
+
+    [Fact]
+    public async Task WithoutACache_EveryRedirectReadsPostgres()
+    {
+        await redis.FlushAsync();
+        var connectionString = await postgres.CreateDatabaseAsync("nocache");
+        using var metrics = new MetricsProbe();
+        await using var instance = ShortyInstance.Start(connectionString, redis: redis.ConnectionString, settings: new Dictionary<string, string> { ["Cache:Mode"] = "None" });
+        using var client = instance.Client();
+        var code = await CreateAsync(client, "https://example.com/uncached");
+
+        for (var i = 0; i < 10; i++)
+        {
+            using var response = await GetAsync(client, code);
+            Assert.Equal(HttpStatusCode.Found, response.StatusCode);
+        }
+
+        Assert.Equal(10, metrics.Total("shorty.cache.misses")); // the baseline the other modes are compared with
+        Assert.Equal(0, await redis.KeyCountAsync());
+    }
+
+    [Fact]
+    public async Task MemoryOnly_KeepsEachInstanceSeparate_AndNeverTouchesRedis()
+    {
+        await redis.FlushAsync();
+        var connectionString = await postgres.CreateDatabaseAsync("memonly");
+        using var metrics = new MetricsProbe();
+        var settings = new Dictionary<string, string> { ["Cache:Mode"] = "MemoryOnly" };
+        await using var first = ShortyInstance.Start(connectionString, redis: redis.ConnectionString, settings: settings);
+        await using var second = ShortyInstance.Start(connectionString, redis: redis.ConnectionString, settings: settings);
+        using var clientA = first.Client();
+        using var clientB = second.Client();
+        var code = await CreateAsync(clientA, "https://example.com/memory");
+
+        (await GetAsync(clientA, code)).Dispose();
+        (await GetAsync(clientA, code)).Dispose();
+        (await GetAsync(clientB, code)).Dispose();
+        (await GetAsync(clientB, code)).Dispose();
+
+        Assert.Equal(2, metrics.Total("shorty.cache.misses")); // one read per instance: with Redis, the second instance would have found it there
+        Assert.Equal(0, await redis.KeyCountAsync());
+    }
 }
