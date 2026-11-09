@@ -8,3 +8,4 @@ Short records of the decisions that shape Shorty.NET: the context, what was deci
 | [0002](0002-short-code-generation.md) | Short code generation: block allocation with a keyed permutation | Accepted |
 | [0003](0003-cache-aside.md) | Cache-aside with memory and Redis layers | Accepted |
 | [0004](0004-rate-limiting.md) | Rate limiting: which algorithm where, and what it does not do | Accepted |
+| [0005](0005-click-analytics.md) | Click analytics through a broker, with a worker | Accepted |

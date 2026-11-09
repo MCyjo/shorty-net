@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/Shorty.Analytics/Shorty.Analytics.csproj" />
     <Project Path="src/Shorty.Api/Shorty.Api.csproj" />
     <Project Path="src/Shorty.Core/Shorty.Core.csproj" />
     <Project Path="src/Shorty.ServiceDefaults/Shorty.ServiceDefaults.csproj" />

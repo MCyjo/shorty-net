@@ -4,10 +4,10 @@ A high-performance URL shortener built to show system design with measurable res
 collision-free code generation across many instances, rate limiting, asynchronous click analytics, and load tests
 with k6 whose numbers are published together with how they were measured.
 
-> **Status: creating links, following them, a two-layer cache and rate limiting work; there are no performance numbers yet.**
+> **Status: creating links, following them, a two-layer cache, rate limiting and click analytics work; there are no performance numbers yet.**
 > Redirects go through memory, then Redis, then PostgreSQL. Whether that is actually faster, and by how much, is not
-> known until the load tests exist, so nothing here claims a speed-up. Click analytics, load tests and the Azure
-> deployment are not started. The sections below say which parts exist and are updated as each is built.
+> known until the load tests exist, so nothing here claims a speed-up. Load tests and the Azure deployment are not
+> started. The sections below say which parts exist and are updated as each is built.
 
 ## API
 
@@ -42,8 +42,9 @@ runs in `docker compose`.
 | Link creation with unique 7-character codes, custom aliases, expiry, URL validation | works; the code scheme is in [ADR 0002](docs/adr/0002-short-code-generation.md) |
 | Redirect (`302`) with cache-aside: memory (HybridCache) → Redis → PostgreSQL | works; TTL with jitter, negative caching, invalidation on create, one database read for concurrent requests on a cold key, Redis outage and slowness do not fail or stall redirects. Design and limits in [ADR 0003](docs/adr/0003-cache-aside.md). Not measured yet |
 | Rate limiting per client: token bucket for creating links (20/min), sliding window for redirects (600/min), fixed window selectable | works; `429` with `Retry-After`, applied before the cache, health endpoints exempt. Limits are **per instance**, so N instances allow up to N times the limit; the numbers are starting points; `X-Forwarded-For` is ignored unless trusted by configuration. Why each algorithm, and what this does not do, in [ADR 0004](docs/adr/0004-rate-limiting.md) |
-| Tests | 81: 47 unit (permutation, allocator, validation), 9 on the API (health without Docker; the three limiting algorithms measured with real time), 25 integration on real PostgreSQL and Redis (three instances, parallel creation, alias race, redirects, cache hits, stampede, negative caching, expiry, Redis stopped and paused, 429 and spoofed headers). The code-generation, cache and rate-limiting properties were checked by breaking the code on purpose |
-| Click analytics, load tests, Azure deployment | not started |
+| Click analytics: redirect → in-memory queue → Event Hubs → `Shorty.Analytics` worker → PostgreSQL (partitioned by month), `GET /api/links/{code}/stats` | works against the Azure Event Hubs **emulator**; not run against real Event Hubs. **Clicks can be lost** (queue full, broker down: counted, never silent); the worker is at-least-once and repeats are ignored; no IP or user agent stored. Design and limits in [ADR 0005](docs/adr/0005-click-analytics.md). The worker's behaviour while PostgreSQL is down is not tested |
+| Tests | 86: 47 unit (permutation, allocator, validation), 9 on the API (health without Docker; the three limiting algorithms measured with real time), 30 integration on real PostgreSQL, Redis and the Event Hubs emulator (three instances, parallel creation, alias race, redirects, cache, 429, clicks end to end, worker restart, malformed message, broker down). The code-generation, cache, rate-limiting and analytics properties were checked by breaking the code on purpose |
+| Load tests, Azure deployment | not started |
 
 ## Running locally
 
@@ -57,6 +58,21 @@ dotnet run --project src/Shorty.Api --launch-profile http
 
 Set `ASPNETCORE_ENVIRONMENT=Development` so the local connection strings in `appsettings.Development.json` are used.
 
+**Click analytics** needs the Azure Event Hubs emulator, which only starts if you accept Microsoft's
+[licence terms](https://github.com/Azure/azure-event-hubs-emulator-installer/blob/main/EMULATOR_EULA.md): read them, then set
+`ACCEPT_EULA=Y` in your `.env`. The integration tests start the emulator themselves and also need that acceptance to be true for you.
+Without `ConnectionStrings:EventHubs` the API runs normally and records no clicks.
+
+```bash
+export ConnectionStrings__EventHubs="Endpoint=sb://localhost;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;"
+export ConnectionStrings__Postgres="<the same string as in appsettings.Development.json>"
+export ConnectionStrings__Checkpoints="UseDevelopmentStorage=true"
+dotnet run --project src/Shorty.Analytics     # the worker; the API publishes when ConnectionStrings:EventHubs is set
+```
+
+The emulator forgets its data when it restarts, but the worker's saved positions (in Azurite) do not. After restarting one, recreate both:
+`docker compose rm -sf eventhubs azurite && docker compose up -d azurite eventhubs`, or the worker reports an invalid offset.
+
 ```bash
 dotnet test        # the integration tests start PostgreSQL with Testcontainers, so Docker must be running
 ```
@@ -66,8 +82,9 @@ dotnet test        # the integration tests start PostgreSQL with Testcontainers,
 ```
 src/Shorty.Core/              code generation, id allocation, URL and alias validation (no dependencies)
 src/Shorty.Api/               ASP.NET Core API and PostgreSQL access
+src/Shorty.Analytics/         worker: Event Hubs to PostgreSQL click storage
 src/Shorty.ServiceDefaults/   OpenTelemetry, health endpoints, graceful shutdown
 tests/                        unit, integration and health tests
 docs/adr/                     decision records
-docker-compose.yml            local PostgreSQL, Redis, Aspire Dashboard
+docker-compose.yml            local PostgreSQL, Redis, Aspire Dashboard, Event Hubs emulator
 ```

@@ -1,3 +1,4 @@
+using Shorty.Api.Analytics;
 using Shorty.Api.Caching;
 using Shorty.Api.RateLimiting;
 using Shorty.Core;
@@ -46,7 +47,14 @@ internal static class LinkEndpoints
         return Results.Created(shortUrl, new CreateLinkResponse(link.Code, shortUrl, link.Url, link.ExpiresAt));
     }
 
-    private static async Task<IResult> RedirectAsync(string code, LinkCache cache, TimeProvider clock, CancellationToken ct)
+    /// <summary>Only the host of the page the visitor came from: enough to see where traffic comes from, nothing that identifies a person.</summary>
+    private static string? ReferrerHost(HttpRequest http) =>
+        Uri.TryCreate(http.Headers.Referer.ToString(), UriKind.Absolute, out var referrer) && referrer.Scheme is "http" or "https"
+            ? referrer.Host
+            : null;
+
+    private static async Task<IResult> RedirectAsync(
+        string code, HttpRequest http, LinkCache cache, IClickSink clicks, TimeProvider clock, CancellationToken ct)
     {
         var link = await cache.GetAsync(code, ct);
         var outcome = new KeyValuePair<string, object?>("outcome", "redirect");
@@ -65,6 +73,7 @@ internal static class LinkEndpoints
         }
 
         ShortyMetrics.Redirects.Add(1, outcome);
+        clicks.Record(code, ReferrerHost(http));
         return Results.Redirect(link.Url!, permanent: false);
     }
 }

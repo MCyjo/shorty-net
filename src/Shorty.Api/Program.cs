@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Caching.StackExchangeRedis;
 using Npgsql;
 using Shorty.Api;
+using Shorty.Api.Analytics;
 using Shorty.Api.Caching;
 using Shorty.Api.Health;
 using Shorty.Api.Links;
@@ -46,6 +47,7 @@ builder.Services.AddHybridCache();
 builder.Services.AddSingleton<LinkCache>();
 
 builder.AddShortyRateLimiting();
+builder.AddShortyClickPublishing();
 
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<IIdBlockStore, PostgresIdBlockStore>();
@@ -75,6 +77,7 @@ if (app.Environment.IsDevelopment() || app.Configuration.GetValue<bool>("Databas
 app.UseShortyRateLimiting();
 app.MapShortyHealthChecks();
 app.MapLinkEndpoints();
+app.MapStatsEndpoint();
 
 app.Run();
 

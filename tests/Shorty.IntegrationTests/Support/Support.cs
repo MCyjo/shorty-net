@@ -68,7 +68,7 @@ public sealed class RedisFixture : IAsyncLifetime
 }
 
 [CollectionDefinition(Name)]
-public sealed class PostgresCollectionDefinition : ICollectionFixture<PostgresFixture>, ICollectionFixture<RedisFixture>
+public sealed class PostgresCollectionDefinition : ICollectionFixture<PostgresFixture>, ICollectionFixture<RedisFixture>, ICollectionFixture<EventHubsFixture>
 {
     // One collection: the tests share process-wide metric counters, so they must not run in parallel.
     public const string Name = "postgres";
