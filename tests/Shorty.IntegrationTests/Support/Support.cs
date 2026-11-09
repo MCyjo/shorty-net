@@ -77,8 +77,10 @@ public sealed class PostgresCollectionDefinition : ICollectionFixture<PostgresFi
 internal static class ShortyInstance
 {
     /// <summary>One in-process copy of the application. Several of them against one database behave like scaled-out instances.</summary>
-    public static WebApplicationFactory<Program> Start(string connectionString, int blockSize = 1000, string? redis = null) =>
-        new WebApplicationFactory<Program>().WithWebHostBuilder(b => b
+    public static WebApplicationFactory<Program> Start(string connectionString, int blockSize = 1000, string? redis = null, IReadOnlyDictionary<string, string>? settings = null) =>
+        new WebApplicationFactory<Program>().WithWebHostBuilder(b =>
+        {
+            b
             .UseSetting("OTEL_SDK_DISABLED", "true")
             // Every instance has its own connection pool, so instances x pool size must stay under the server's max_connections
             // (100 here). Without a cap, three instances under load ask for up to 300 and the server answers 53300.
@@ -87,7 +89,12 @@ internal static class ShortyInstance
             .UseSetting("ConnectionStrings:Redis", redis ?? "127.0.0.1:1,abortConnect=false,connectTimeout=200")
             .UseSetting("CodeGeneration:Seed", "20260507")
             .UseSetting("Shorty:IdBlockSize", blockSize.ToString(System.Globalization.CultureInfo.InvariantCulture))
-            .UseSetting("Database:MigrateOnStartup", "true"));
+            .UseSetting("Database:MigrateOnStartup", "true")
+            // One test process is one client address, and several tests create thousands of links: limits are off unless a test
+            // is about them.
+            .UseSetting("RateLimiting:Enabled", "false");
+            foreach (var (key, value) in settings ?? new Dictionary<string, string>()) b.UseSetting(key, value);
+        });
 
     public static HttpClient Client(this WebApplicationFactory<Program> instance) =>
         instance.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });

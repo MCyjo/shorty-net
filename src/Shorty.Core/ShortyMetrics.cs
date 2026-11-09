@@ -26,6 +26,10 @@ public static class ShortyMetrics
     public static readonly Counter<long> Redirects =
         Meter.CreateCounter<long>("shorty.redirects", description: "Redirect requests, by outcome.");
 
+    /// <summary>Requests refused with 429, tagged with the policy that refused them.</summary>
+    public static readonly Counter<long> RateLimited =
+        Meter.CreateCounter<long>("shorty.ratelimit.rejected", description: "Requests refused by a rate limit, by policy.");
+
     public static readonly Counter<long> BlocksAllocated =
         Meter.CreateCounter<long>("shorty.id.blocks_allocated", description: "Id blocks reserved from the shared store.");
 }

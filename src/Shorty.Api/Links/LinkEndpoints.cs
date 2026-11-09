@@ -1,4 +1,5 @@
 using Shorty.Api.Caching;
+using Shorty.Api.RateLimiting;
 using Shorty.Core;
 
 namespace Shorty.Api.Links;
@@ -11,12 +12,12 @@ internal static class LinkEndpoints
 {
     public static void MapLinkEndpoints(this WebApplication app)
     {
-        app.MapPost("/api/links", CreateAsync);
+        app.MapPost("/api/links", CreateAsync).RequireRateLimiting(RateLimitPolicies.Create);
 
         // One path segment, so /health/live and /api/links never match; "api" and "health" are reserved as aliases.
         // Redirects are temporary (302): a 301 is cached by browsers for good, which would hide every later click
         // from analytics and make a changed or expired link impossible to retract.
-        app.MapGet("/{code:regex(^[A-Za-z0-9_-]{{3,32}}$)}", RedirectAsync);
+        app.MapGet("/{code:regex(^[A-Za-z0-9_-]{{3,32}}$)}", RedirectAsync).RequireRateLimiting(RateLimitPolicies.Redirect);
     }
 
     private static async Task<IResult> CreateAsync(

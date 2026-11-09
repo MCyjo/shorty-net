@@ -5,6 +5,7 @@ using Shorty.Api.Caching;
 using Shorty.Api.Health;
 using Shorty.Api.Links;
 using Shorty.Api.Persistence;
+using Shorty.Api.RateLimiting;
 using Shorty.Core;
 using Shorty.ServiceDefaults;
 using StackExchange.Redis;
@@ -44,6 +45,8 @@ builder.Services.AddStackExchangeRedisCache(_ => { });
 builder.Services.AddHybridCache();
 builder.Services.AddSingleton<LinkCache>();
 
+builder.AddShortyRateLimiting();
+
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<IIdBlockStore, PostgresIdBlockStore>();
 builder.Services.AddSingleton(sp => new BlockIdSource(sp.GetRequiredService<IIdBlockStore>(), blockSize));
@@ -69,6 +72,7 @@ if (app.Environment.IsDevelopment() || app.Configuration.GetValue<bool>("Databas
         app.Logger.MigrationApplied(version);
 }
 
+app.UseShortyRateLimiting();
 app.MapShortyHealthChecks();
 app.MapLinkEndpoints();
 

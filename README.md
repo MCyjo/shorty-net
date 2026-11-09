@@ -4,10 +4,10 @@ A high-performance URL shortener built to show system design with measurable res
 collision-free code generation across many instances, rate limiting, asynchronous click analytics, and load tests
 with k6 whose numbers are published together with how they were measured.
 
-> **Status: creating links, following them and a two-layer cache work; there are no performance numbers yet.**
+> **Status: creating links, following them, a two-layer cache and rate limiting work; there are no performance numbers yet.**
 > Redirects go through memory, then Redis, then PostgreSQL. Whether that is actually faster, and by how much, is not
-> known until the load tests exist, so nothing here claims a speed-up. Rate limiting, click analytics, load tests and the
-> Azure deployment are not started. The sections below say which parts exist and are updated as each is built.
+> known until the load tests exist, so nothing here claims a speed-up. Click analytics, load tests and the Azure
+> deployment are not started. The sections below say which parts exist and are updated as each is built.
 
 ## API
 
@@ -41,8 +41,9 @@ runs in `docker compose`.
 | `docker compose` with PostgreSQL, Redis (cache settings) and the Aspire Dashboard | starts healthy; Redis confirmed as `allkeys-lru`, 256 MB, no persistence |
 | Link creation with unique 7-character codes, custom aliases, expiry, URL validation | works; the code scheme is in [ADR 0002](docs/adr/0002-short-code-generation.md) |
 | Redirect (`302`) with cache-aside: memory (HybridCache) → Redis → PostgreSQL | works; TTL with jitter, negative caching, invalidation on create, one database read for concurrent requests on a cold key, Redis outage and slowness do not fail or stall redirects. Design and limits in [ADR 0003](docs/adr/0003-cache-aside.md). Not measured yet |
-| Tests | 69: 47 unit (permutation, allocator, validation), 20 integration on real PostgreSQL and Redis (three instances, parallel creation, alias race, redirects, cache hits, stampede, negative caching, expiry, Redis stopped and paused), 2 health. The code-generation properties and four cache properties were checked by breaking the code on purpose |
-| Rate limiting, click analytics, load tests, Azure deployment | not started |
+| Rate limiting per client: token bucket for creating links (20/min), sliding window for redirects (600/min), fixed window selectable | works; `429` with `Retry-After`, applied before the cache, health endpoints exempt. Limits are **per instance**, so N instances allow up to N times the limit; the numbers are starting points; `X-Forwarded-For` is ignored unless trusted by configuration. Why each algorithm, and what this does not do, in [ADR 0004](docs/adr/0004-rate-limiting.md) |
+| Tests | 81: 47 unit (permutation, allocator, validation), 9 on the API (health without Docker; the three limiting algorithms measured with real time), 25 integration on real PostgreSQL and Redis (three instances, parallel creation, alias race, redirects, cache hits, stampede, negative caching, expiry, Redis stopped and paused, 429 and spoofed headers). The code-generation, cache and rate-limiting properties were checked by breaking the code on purpose |
+| Click analytics, load tests, Azure deployment | not started |
 
 ## Running locally
 
