@@ -1,4 +1,4 @@
-using Shorty.Api.Persistence;
+using Shorty.Api.Caching;
 using Shorty.Core;
 
 namespace Shorty.Api.Links;
@@ -20,7 +20,7 @@ internal static class LinkEndpoints
     }
 
     private static async Task<IResult> CreateAsync(
-        CreateLinkRequest request, HttpRequest http, LinkService links, TimeProvider clock, IConfiguration config, CancellationToken ct)
+        CreateLinkRequest request, HttpRequest http, LinkService links, LinkCache cache, TimeProvider clock, IConfiguration config, CancellationToken ct)
     {
         var errors = new Dictionary<string, string[]>();
 
@@ -38,17 +38,32 @@ internal static class LinkEndpoints
             return Results.Conflict(new { error = $"The alias '{request.Alias}' is already taken." });
 
         var link = outcome.Link!;
+        // A negative entry for this code may be cached (someone asked for it before it existed): drop it.
+        await cache.InvalidateAsync(link.Code, ct);
         var baseUrl = (config["Shorty:BaseUrl"] ?? $"{http.Scheme}://{http.Host}").TrimEnd('/');
         var shortUrl = $"{baseUrl}/{link.Code}";
         return Results.Created(shortUrl, new CreateLinkResponse(link.Code, shortUrl, link.Url, link.ExpiresAt));
     }
 
-    private static async Task<IResult> RedirectAsync(string code, ILinkStore store, TimeProvider clock, CancellationToken ct)
+    private static async Task<IResult> RedirectAsync(string code, LinkCache cache, TimeProvider clock, CancellationToken ct)
     {
-        var link = await store.FindAsync(code, ct);
-        if (link is null) return Results.NotFound();
-        if (link.ExpiresAt is { } expiresAt && expiresAt <= clock.GetUtcNow()) return Results.StatusCode(StatusCodes.Status410Gone);
+        var link = await cache.GetAsync(code, ct);
+        var outcome = new KeyValuePair<string, object?>("outcome", "redirect");
 
-        return Results.Redirect(link.Url, permanent: false);
+        if (!link.Found)
+        {
+            ShortyMetrics.Redirects.Add(1, new KeyValuePair<string, object?>("outcome", "not_found"));
+            return Results.NotFound();
+        }
+        // The expiry is checked on every request against the cached value, so an expired link stops working on time
+        // without any invalidation.
+        if (link.ExpiresAt is { } expiresAt && expiresAt <= clock.GetUtcNow())
+        {
+            ShortyMetrics.Redirects.Add(1, new KeyValuePair<string, object?>("outcome", "expired"));
+            return Results.StatusCode(StatusCodes.Status410Gone);
+        }
+
+        ShortyMetrics.Redirects.Add(1, outcome);
+        return Results.Redirect(link.Url!, permanent: false);
     }
 }

@@ -2,7 +2,10 @@ using System.Diagnostics.Metrics;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Npgsql;
+using System.Net;
+using System.Net.Sockets;
 using Testcontainers.PostgreSql;
+using Testcontainers.Redis;
 
 namespace Shorty.IntegrationTests.Support;
 
@@ -28,8 +31,44 @@ public sealed class PostgresFixture : IAsyncLifetime
     }
 }
 
+/// <summary>
+/// A Redis container on a fixed host port: the tests stop and start it to simulate an outage, and a restart with a random
+/// port would hand the application an address that no longer exists.
+/// </summary>
+public sealed class RedisFixture : IAsyncLifetime
+{
+    private readonly int _port = FreePort();
+    private readonly RedisContainer _container;
+
+    public RedisFixture() =>
+        _container = new RedisBuilder("redis:7.2-alpine").WithPortBinding(_port, 6379).Build();
+
+    public string ConnectionString => $"127.0.0.1:{_port},abortConnect=false,connectTimeout=1000";
+
+    public Task InitializeAsync() => _container.StartAsync();
+
+    public async Task DisposeAsync() => await _container.DisposeAsync();
+
+    public Task StopAsync() => _container.StopAsync();
+
+    public Task StartAsync() => _container.StartAsync();
+
+    public Task FlushAsync() => _container.ExecAsync(["redis-cli", "FLUSHALL"]);
+
+    /// <summary>Makes Redis accept connections but stop answering for a while, like a server that is overloaded.</summary>
+    public Task PauseAsync(TimeSpan duration) =>
+        _container.ExecAsync(["redis-cli", "CLIENT", "PAUSE", ((int)duration.TotalMilliseconds).ToString(System.Globalization.CultureInfo.InvariantCulture), "ALL"]);
+
+    private static int FreePort()
+    {
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        return ((IPEndPoint)listener.LocalEndpoint).Port;
+    }
+}
+
 [CollectionDefinition(Name)]
-public sealed class PostgresCollectionDefinition : ICollectionFixture<PostgresFixture>
+public sealed class PostgresCollectionDefinition : ICollectionFixture<PostgresFixture>, ICollectionFixture<RedisFixture>
 {
     // One collection: the tests share process-wide metric counters, so they must not run in parallel.
     public const string Name = "postgres";
@@ -38,14 +77,14 @@ public sealed class PostgresCollectionDefinition : ICollectionFixture<PostgresFi
 internal static class ShortyInstance
 {
     /// <summary>One in-process copy of the application. Several of them against one database behave like scaled-out instances.</summary>
-    public static WebApplicationFactory<Program> Start(string connectionString, int blockSize = 1000) =>
+    public static WebApplicationFactory<Program> Start(string connectionString, int blockSize = 1000, string? redis = null) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(b => b
             .UseSetting("OTEL_SDK_DISABLED", "true")
             // Every instance has its own connection pool, so instances x pool size must stay under the server's max_connections
             // (100 here). Without a cap, three instances under load ask for up to 300 and the server answers 53300.
             .UseSetting("ConnectionStrings:Postgres", new NpgsqlConnectionStringBuilder(connectionString) { MaxPoolSize = 20 }.ConnectionString)
-            // Never contacted by these tests: the cache is not used yet and readiness is not probed.
-            .UseSetting("ConnectionStrings:Redis", "127.0.0.1:1,abortConnect=false,connectTimeout=200")
+            // Tests that do not care about the cache get an unreachable Redis: the redirect path must work without it anyway.
+            .UseSetting("ConnectionStrings:Redis", redis ?? "127.0.0.1:1,abortConnect=false,connectTimeout=200")
             .UseSetting("CodeGeneration:Seed", "20260507")
             .UseSetting("Shorty:IdBlockSize", blockSize.ToString(System.Globalization.CultureInfo.InvariantCulture))
             .UseSetting("Database:MigrateOnStartup", "true"));

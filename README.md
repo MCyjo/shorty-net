@@ -4,10 +4,10 @@ A high-performance URL shortener built to show system design with measurable res
 collision-free code generation across many instances, rate limiting, asynchronous click analytics, and load tests
 with k6 whose numbers are published together with how they were measured.
 
-> **Status: creating links and following them works; there is no cache yet and no performance numbers.**
-> Created links are stored in PostgreSQL and redirects read PostgreSQL directly, which is the baseline the cache will be
-> measured against. Rate limiting, click analytics, load tests and the Azure deployment are not started. The sections
-> below say which parts exist and are updated as each is built.
+> **Status: creating links, following them and a two-layer cache work; there are no performance numbers yet.**
+> Redirects go through memory, then Redis, then PostgreSQL. Whether that is actually faster, and by how much, is not
+> known until the load tests exist, so nothing here claims a speed-up. Rate limiting, click analytics, load tests and the
+> Azure deployment are not started. The sections below say which parts exist and are updated as each is built.
 
 ## API
 
@@ -40,9 +40,9 @@ runs in `docker compose`.
 | OpenTelemetry (OTLP to the Aspire Dashboard, optional console exporter) | traces, logs and metrics all reach the dashboard; that the custom counters (`shorty.links.created`, `shorty.code.collisions`, `shorty.id.blocks_allocated`) show up as series was not checked, only that metrics arrive |
 | `docker compose` with PostgreSQL, Redis (cache settings) and the Aspire Dashboard | starts healthy; Redis confirmed as `allkeys-lru`, 256 MB, no persistence |
 | Link creation with unique 7-character codes, custom aliases, expiry, URL validation | works; the code scheme is in [ADR 0002](docs/adr/0002-short-code-generation.md) |
-| Redirect (`302`) read straight from PostgreSQL | works; this is the **no-cache baseline**, not the final design |
-| Tests | 62: 47 unit (permutation, allocator, validation), 13 integration on real PostgreSQL (three instances, parallel creation, alias race, redirects), 2 health. Every property above was checked by breaking the code on purpose |
-| Cache-aside with Redis, rate limiting, click analytics, load tests, Azure deployment | not started |
+| Redirect (`302`) with cache-aside: memory (HybridCache) → Redis → PostgreSQL | works; TTL with jitter, negative caching, invalidation on create, one database read for concurrent requests on a cold key, Redis outage and slowness do not fail or stall redirects. Design and limits in [ADR 0003](docs/adr/0003-cache-aside.md). Not measured yet |
+| Tests | 69: 47 unit (permutation, allocator, validation), 20 integration on real PostgreSQL and Redis (three instances, parallel creation, alias race, redirects, cache hits, stampede, negative caching, expiry, Redis stopped and paused), 2 health. The code-generation properties and four cache properties were checked by breaking the code on purpose |
+| Rate limiting, click analytics, load tests, Azure deployment | not started |
 
 ## Running locally
 

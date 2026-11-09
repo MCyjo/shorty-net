@@ -18,6 +18,14 @@ public static class ShortyMetrics
     public static readonly Counter<long> CodeCollisions =
         Meter.CreateCounter<long>("shorty.code.collisions", description: "Generated codes that were already taken.");
 
+    /// <summary>Redirect lookups that were not served from memory or Redis and had to read PostgreSQL.</summary>
+    public static readonly Counter<long> CacheMisses =
+        Meter.CreateCounter<long>("shorty.cache.misses", description: "Lookups that had to read PostgreSQL.");
+
+    /// <summary>Every redirect request, tagged with its outcome: redirect, not_found or expired. Hits = redirects - cache misses.</summary>
+    public static readonly Counter<long> Redirects =
+        Meter.CreateCounter<long>("shorty.redirects", description: "Redirect requests, by outcome.");
+
     public static readonly Counter<long> BlocksAllocated =
         Meter.CreateCounter<long>("shorty.id.blocks_allocated", description: "Id blocks reserved from the shared store.");
 }
