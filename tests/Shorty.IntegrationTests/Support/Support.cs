@@ -41,7 +41,9 @@ internal static class ShortyInstance
     public static WebApplicationFactory<Program> Start(string connectionString, int blockSize = 1000) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(b => b
             .UseSetting("OTEL_SDK_DISABLED", "true")
-            .UseSetting("ConnectionStrings:Postgres", connectionString)
+            // Every instance has its own connection pool, so instances x pool size must stay under the server's max_connections
+            // (100 here). Without a cap, three instances under load ask for up to 300 and the server answers 53300.
+            .UseSetting("ConnectionStrings:Postgres", new NpgsqlConnectionStringBuilder(connectionString) { MaxPoolSize = 20 }.ConnectionString)
             // Never contacted by these tests: the cache is not used yet and readiness is not probed.
             .UseSetting("ConnectionStrings:Redis", "127.0.0.1:1,abortConnect=false,connectTimeout=200")
             .UseSetting("CodeGeneration:Seed", "20260507")

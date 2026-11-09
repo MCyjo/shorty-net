@@ -43,13 +43,18 @@ public sealed class LinkTests(PostgresFixture postgres)
                 try
                 {
                     using var response = await PostAsync(clients[i % clients.Length], new { url = $"https://example.com/page/{i}" });
-                    return (response.StatusCode, Body: await response.Content.ReadFromJsonAsync<CreateLinkResponse>());
+                    // Read the body as text first: a failure body is not JSON, and parsing it blindly hides the real error.
+                    var text = await response.Content.ReadAsStringAsync();
+                    return (response.StatusCode, Text: text);
                 }
                 finally { limit.Release(); }
             }));
 
-            Assert.All(responses, r => Assert.Equal(HttpStatusCode.Created, r.StatusCode));
-            var codes = responses.Select(r => r.Body!.Code).ToList();
+            var failures = responses.Where(r => r.StatusCode != HttpStatusCode.Created).ToList();
+            Assert.True(failures.Count == 0,
+                $"{failures.Count} of {total} requests failed; first: {failures.FirstOrDefault().StatusCode} {failures.FirstOrDefault().Text}");
+
+            var codes = responses.Select(r => System.Text.Json.JsonSerializer.Deserialize<CreateLinkResponse>(r.Text, System.Text.Json.JsonSerializerOptions.Web)!.Code).ToList();
             Assert.Equal(total, codes.Distinct().Count());
             Assert.All(codes, code => Assert.Equal(7, code.Length));
 
