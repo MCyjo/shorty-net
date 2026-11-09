@@ -4,10 +4,12 @@ A high-performance URL shortener built to show system design with measurable res
 collision-free code generation across many instances, rate limiting, asynchronous click analytics, and load tests
 with k6 whose numbers are published together with how they were measured.
 
-> **Status: creating links, following them, a two-layer cache, rate limiting and click analytics work; there are no performance numbers yet.**
+> **Status: creating links, following them, a two-layer cache, rate limiting and click analytics work and are tested locally.
+> There are no performance numbers, and nothing has been deployed to Azure.**
 > Redirects go through memory, then Redis, then PostgreSQL. Whether that is actually faster, and by how much, is not
-> known until the load tests exist, so nothing here claims a speed-up. Load tests and the Azure deployment are not
-> started. The sections below say which parts exist and are updated as each is built.
+> known: the load-test harness is written but its comparison run never completed, so nothing here claims a speed-up. The
+> Azure infrastructure is written and validated offline but was never applied. The table below says which parts exist and how
+> each was checked. How the pieces fit together is in [docs/architecture.md](docs/architecture.md).
 
 ## API
 
@@ -16,21 +18,35 @@ POST /api/links     { "url": "https://example.com/very/long/url", "alias": "my-d
                     ->  201 { "code": "jSJvui7", "shortUrl": "https://host/jSJvui7", "url": "...", "expiresAt": null }
                     (alias and expiresAt are optional; 400 for an invalid URL or alias, 409 when the alias is taken)
 GET  /jSJvui7       ->  302 to the original URL   (404 unknown, 410 expired)
+GET  /api/links/jSJvui7/stats?days=7
+                    ->  200 { "code": "jSJvui7", "totalClicks": 42, "days": 7, "daily": [ { "date": "2026-11-09", "clicks": 42 } ] }
+                    (days 1 to 90; 404 for an unknown code; the newest seconds may not be counted yet, see ADR 0005)
+
+Any of them can answer 429 with a Retry-After header when a client exceeds its limit (ADR 0004).
+GET  /health/live, /health/ready    liveness (no dependencies) and readiness (PostgreSQL and Redis)
 ```
 
 Only absolute `http` and `https` URLs without embedded credentials are accepted. Redirects are temporary (302) on purpose: a 301 is cached
 by browsers for good, which would hide every later click from analytics and make a link impossible to retract.
 
-## Intended shape
+## Shape
 
 ```
-Client -> load balancer -> ASP.NET Core API -> Redis (hot links) -> PostgreSQL
-                                   \-> ClickRecorded -> message broker -> analytics worker -> analytics store
+                       ┌──────────── Shorty.Api ─────────────┐
+Client ─► rate limit ─►│ redirect ─► memory ─► Redis ─► PostgreSQL (links)
+                       │      └─► in-memory queue                │
+                       └──────────────┬──────────────────────────┘
+                                      ▼
+                                 Event Hubs ─► Shorty.Analytics ─► PostgreSQL (click_events, by month)
+                                                                        ▲
+                                  GET /api/links/{code}/stats ──────────┘
 ```
 
-Where it runs: PostgreSQL as Azure Database for PostgreSQL Flexible Server, Redis as a container
-([ADR 0001](docs/adr/0001-redis-in-a-container.md)), the API and worker on Azure Container Apps, infrastructure in Terraform. Locally everything
-runs in `docker compose`.
+[docs/architecture.md](docs/architecture.md) walks through each path, what happens when a part fails, and where the data lives.
+
+Where it is meant to run: PostgreSQL as Azure Database for PostgreSQL Flexible Server (private access), Redis as a container
+([ADR 0001](docs/adr/0001-redis-in-a-container.md)), the API and the worker on Azure Container Apps, infrastructure in Terraform
+([ADR 0006](docs/adr/0006-azure-deployment.md); **not applied yet**). Locally everything runs in `docker compose`.
 
 ## What exists today
 
@@ -43,7 +59,7 @@ runs in `docker compose`.
 | Redirect (`302`) with cache-aside: memory (HybridCache) → Redis → PostgreSQL | works; TTL with jitter, negative caching, invalidation on create, one database read for concurrent requests on a cold key, Redis outage and slowness do not fail or stall redirects. Design and limits in [ADR 0003](docs/adr/0003-cache-aside.md). Not measured yet |
 | Rate limiting per client: token bucket for creating links (20/min), sliding window for redirects (600/min), fixed window selectable | works; `429` with `Retry-After`, applied before the cache, health endpoints exempt. Limits are **per instance**, so N instances allow up to N times the limit; the numbers are starting points; `X-Forwarded-For` is ignored unless trusted by configuration. Why each algorithm, and what this does not do, in [ADR 0004](docs/adr/0004-rate-limiting.md) |
 | Click analytics: redirect → in-memory queue → Event Hubs → `Shorty.Analytics` worker → PostgreSQL (partitioned by month), `GET /api/links/{code}/stats` | works against the Azure Event Hubs **emulator**; not run against real Event Hubs. **Clicks can be lost** (queue full, broker down: counted, never silent); the worker is at-least-once and repeats are ignored; no IP or user agent stored. Design and limits in [ADR 0005](docs/adr/0005-click-analytics.md). The worker's behaviour while PostgreSQL is down is not tested |
-| Tests | 86: 47 unit (permutation, allocator, validation), 9 on the API (health without Docker; the three limiting algorithms measured with real time), 30 integration on real PostgreSQL, Redis and the Event Hubs emulator (three instances, parallel creation, alias race, redirects, cache, 429, clicks end to end, worker restart, malformed message, broker down). The code-generation, cache, rate-limiting and analytics properties were checked by breaking the code on purpose |
+| Tests | 95: 54 unit (permutation, allocator, validation, which kind of broker setting is given), 9 on the API (health without Docker; the three limiting algorithms measured with real time), 32 integration on real PostgreSQL, Redis and the Event Hubs emulator (three instances, parallel creation, alias race, redirects, the three cache modes, 429, clicks end to end, worker restart, malformed message, broker down). The code-generation, cache, rate-limiting and analytics properties were checked by breaking the code on purpose. Not covered by any test: signing in with a managed identity, the worker while PostgreSQL is down, the Terraform |
 | Load tests (k6, open model, in an isolated compose stack): harness in [`loadtest/`](loadtest/README.md) | the harness works; **no results are published**: the full comparison run was stopped (low memory on the machine) before it produced data, so there is no throughput or latency number in this repository yet |
 | Azure deployment: Container Apps, private PostgreSQL, Event Hubs and storage without keys, ACR, Terraform, manual deploy workflow with OIDC | **written, never applied**: validated offline only. Design, cost estimate and everything unverified in [ADR 0006](docs/adr/0006-azure-deployment.md) |
 
