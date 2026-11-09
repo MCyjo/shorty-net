@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Azure.Identity;
 using Azure.Messaging.EventHubs;
 using Azure.Messaging.EventHubs.Consumer;
 using Azure.Messaging.EventHubs.Processor;
@@ -59,16 +60,22 @@ internal sealed partial class ClickConsumer(
         // if the default partition already holds clicks that belong to it.
         await store.EnsurePartitionsAsync(clock.GetUtcNow(), options.PartitionsAheadMonths, stoppingToken);
 
-        var container = new BlobContainerClient(checkpoints, options.CheckpointContainer);
+        // Connection strings for local development and the emulator; in Azure only addresses are given and the managed identity signs in.
+        var credential = new DefaultAzureCredential();
+        var container = BrokerConnection.IsBlobAddress(checkpoints)
+            ? new BlobContainerClient(new Uri($"{checkpoints.TrimEnd('/')}/{options.CheckpointContainer}"), credential)
+            : new BlobContainerClient(checkpoints, options.CheckpointContainer);
         await container.CreateIfNotExistsAsync(cancellationToken: stoppingToken);
 
-        var processor = new EventProcessorClient(container, options.ConsumerGroup, eventHubs, options.EventHubName,
-            new EventProcessorClientOptions
-            {
-                // Without this the handler is only called when an event arrives, and a quiet partition would never flush.
-                MaximumWaitTime = options.FlushInterval,
-                LoadBalancingStrategy = LoadBalancingStrategy.Greedy,
-            });
+        var processorOptions = new EventProcessorClientOptions
+        {
+            // Without this the handler is only called when an event arrives, and a quiet partition would never flush.
+            MaximumWaitTime = options.FlushInterval,
+            LoadBalancingStrategy = LoadBalancingStrategy.Greedy,
+        };
+        var processor = BrokerConnection.IsEventHubsConnectionString(eventHubs)
+            ? new EventProcessorClient(container, options.ConsumerGroup, eventHubs, options.EventHubName, processorOptions)
+            : new EventProcessorClient(container, options.ConsumerGroup, eventHubs, options.EventHubName, credential, processorOptions);
         // With no saved position (the first start ever, or a new consumer group) read from the oldest event the broker still has.
         // The default is "only new events", which would silently skip every click published before the worker first ran.
         processor.PartitionInitializingAsync += args =>

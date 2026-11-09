@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Threading.Channels;
+using Azure.Identity;
 using Azure.Messaging.EventHubs;
 using Azure.Messaging.EventHubs.Producer;
 using Shorty.Core;
@@ -173,14 +174,19 @@ internal static class ClickPublishingExtensions
             return;
         }
 
-        builder.Services.AddSingleton(sp => new EventHubProducerClient(
-            connection,
-            sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<AnalyticsSettings>>().Value.EventHubName,
-            new EventHubProducerClientOptions
+        builder.Services.AddSingleton(sp =>
+        {
+            var settings = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<AnalyticsSettings>>().Value;
+            var options = new EventHubProducerClientOptions
             {
                 // Bounded retries: the producer must give up, so the queue behind it drains or drops instead of waiting for minutes.
                 RetryOptions = new EventHubsRetryOptions { MaximumRetries = 1, TryTimeout = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<AnalyticsSettings>>().Value.SendTimeout, Delay = TimeSpan.FromMilliseconds(200) },
-            }));
+            };
+            // A connection string (local, emulator) or just the namespace address, in which case the managed identity signs in.
+            return BrokerConnection.IsEventHubsConnectionString(connection)
+                ? new EventHubProducerClient(connection, settings.EventHubName, options)
+                : new EventHubProducerClient(connection, settings.EventHubName, new DefaultAzureCredential(), options);
+        });
         builder.Services.AddSingleton<ChannelClickSink>();
         builder.Services.AddSingleton<IClickSink>(sp => sp.GetRequiredService<ChannelClickSink>());
         builder.Services.AddHostedService<ClickPublisher>();

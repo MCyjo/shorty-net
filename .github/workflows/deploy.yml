@@ -1,0 +1,79 @@
+name: Deploy
+
+# Manual on purpose: the Azure environment is created for a demonstration and destroyed afterwards (it costs money while it exists),
+# so a push to main must not try to deploy into something that is not there.
+on:
+  workflow_dispatch:
+    inputs:
+      update_apps:
+        description: "Update the running apps to the new images. Turn off for the very first push, before the apps exist."
+        type: boolean
+        default: true
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  id-token: write # lets the job ask GitHub for the OIDC token that Azure exchanges for an access token
+  contents: read
+
+env:
+  REGISTRY_NAME: ${{ vars.ACR_NAME }}
+  RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # No secret anywhere: Azure trusts tokens GitHub issues for this repository and branch (infra/scripts/setup-github-oidc.ps1).
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Sign in to the registry
+        run: az acr login --name "$REGISTRY_NAME"
+
+      - name: Build and push the images
+        run: |
+          set -euo pipefail
+          server="$(az acr show --name "$REGISTRY_NAME" --query loginServer -o tsv)"
+          for project in Shorty.Api Shorty.Analytics; do
+            image="$server/$(echo "$project" | tr 'A-Z.' 'a-z-'):${GITHUB_SHA}"
+            docker build --build-arg PROJECT="$project" -t "$image" -t "${image%:*}:latest" .
+            docker push "$image"
+            docker push "${image%:*}:latest"
+          done
+
+      - name: Update the apps
+        if: ${{ inputs.update_apps }}
+        run: |
+          set -euo pipefail
+          server="$(az acr show --name "$REGISTRY_NAME" --query loginServer -o tsv)"
+          az containerapp update --resource-group "$RESOURCE_GROUP" --name ca-shorty-dev-api       --image "$server/shorty-api:${GITHUB_SHA}"
+          az containerapp update --resource-group "$RESOURCE_GROUP" --name ca-shorty-dev-analytics --image "$server/shorty-analytics:${GITHUB_SHA}"
+
+      # The new revision must answer before the run is called a success.
+      - name: Smoke test
+        if: ${{ inputs.update_apps }}
+        run: |
+          set -euo pipefail
+          fqdn="$(az containerapp show --resource-group "$RESOURCE_GROUP" --name ca-shorty-dev-api --query properties.configuration.ingress.fqdn -o tsv)"
+          for attempt in $(seq 1 30); do
+            code="$(curl -s -o /dev/null -w '%{http_code}' "https://$fqdn/health/live" || true)"
+            [ "$code" = "200" ] && { echo "live after $attempt tries"; break; }
+            sleep 5
+          done
+          [ "$code" = "200" ] || { echo "API did not become live (last status $code)"; exit 1; }
+
+          created="$(curl -s -X POST "https://$fqdn/api/links" -H 'Content-Type: application/json' -d '{"url":"https://example.com/deploy-check"}')"
+          code="$(echo "$created" | sed -n 's/.*"code":"\([^"]*\)".*/\1/p')"
+          [ -n "$code" ] || { echo "creating a link failed: $created"; exit 1; }
+          status="$(curl -s -o /dev/null -w '%{http_code}' "https://$fqdn/$code")"
+          [ "$status" = "302" ] || { echo "expected 302 from /$code, got $status"; exit 1; }
+          echo "created $code and it redirects (302)"

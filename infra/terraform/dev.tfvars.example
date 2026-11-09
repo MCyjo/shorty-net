@@ -1,0 +1,5 @@
+# Copy to dev.tfvars (git-ignored).
+subscription_id             = "00000000-0000-0000-0000-000000000000"
+location                    = "northeurope"
+github_actions_principal_id = "" # object id of the identity created by scripts/setup-github-oidc.ps1
+deploy_apps                 = false

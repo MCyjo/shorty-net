@@ -44,7 +44,8 @@ runs in `docker compose`.
 | Rate limiting per client: token bucket for creating links (20/min), sliding window for redirects (600/min), fixed window selectable | works; `429` with `Retry-After`, applied before the cache, health endpoints exempt. Limits are **per instance**, so N instances allow up to N times the limit; the numbers are starting points; `X-Forwarded-For` is ignored unless trusted by configuration. Why each algorithm, and what this does not do, in [ADR 0004](docs/adr/0004-rate-limiting.md) |
 | Click analytics: redirect → in-memory queue → Event Hubs → `Shorty.Analytics` worker → PostgreSQL (partitioned by month), `GET /api/links/{code}/stats` | works against the Azure Event Hubs **emulator**; not run against real Event Hubs. **Clicks can be lost** (queue full, broker down: counted, never silent); the worker is at-least-once and repeats are ignored; no IP or user agent stored. Design and limits in [ADR 0005](docs/adr/0005-click-analytics.md). The worker's behaviour while PostgreSQL is down is not tested |
 | Tests | 86: 47 unit (permutation, allocator, validation), 9 on the API (health without Docker; the three limiting algorithms measured with real time), 30 integration on real PostgreSQL, Redis and the Event Hubs emulator (three instances, parallel creation, alias race, redirects, cache, 429, clicks end to end, worker restart, malformed message, broker down). The code-generation, cache, rate-limiting and analytics properties were checked by breaking the code on purpose |
-| Load tests, Azure deployment | not started |
+| Load tests (k6, open model, in an isolated compose stack): harness in [`loadtest/`](loadtest/README.md) | the harness works; **no results are published**: the full comparison run was stopped (low memory on the machine) before it produced data, so there is no throughput or latency number in this repository yet |
+| Azure deployment: Container Apps, private PostgreSQL, Event Hubs and storage without keys, ACR, Terraform, manual deploy workflow with OIDC | **written, never applied**: validated offline only. Design, cost estimate and everything unverified in [ADR 0006](docs/adr/0006-azure-deployment.md) |
 
 ## Running locally
 
@@ -83,6 +84,8 @@ dotnet test        # the integration tests start PostgreSQL with Testcontainers,
 src/Shorty.Core/              code generation, id allocation, URL and alias validation (no dependencies)
 src/Shorty.Api/               ASP.NET Core API and PostgreSQL access
 src/Shorty.Analytics/         worker: Event Hubs to PostgreSQL click storage
+infra/                        Terraform (Azure) and the scripts that prepare state and GitHub sign-in
+loadtest/                     k6 scripts and an isolated compose stack for load tests
 src/Shorty.ServiceDefaults/   OpenTelemetry, health endpoints, graceful shutdown
 tests/                        unit, integration and health tests
 docs/adr/                     decision records

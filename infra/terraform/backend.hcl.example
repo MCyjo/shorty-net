@@ -1,0 +1,6 @@
+# Written by scripts/bootstrap-state.ps1 as backend.hcl (git-ignored). Shown here so the shape is visible.
+resource_group_name  = "rg-shorty-tfstate"
+storage_account_name = "stshortytfstate<suffix>"
+container_name       = "tfstate"
+key                  = "shorty-dev.tfstate"
+use_azuread_auth     = true

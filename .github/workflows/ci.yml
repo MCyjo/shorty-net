@@ -42,3 +42,16 @@ jobs:
 
       - name: Test
         run: dotnet test Shorty.slnx --configuration Release --no-build
+
+  # The images that get deployed are built from the Dockerfile, so it is built on every change (not pushed anywhere).
+  docker-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        project: [Shorty.Api, Shorty.Analytics]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build ${{ matrix.project }}
+        run: docker build --build-arg PROJECT=${{ matrix.project }} -t shorty-ci:${{ matrix.project }} .
