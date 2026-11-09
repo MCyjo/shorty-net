@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Shorty.ServiceDefaults\Shorty.ServiceDefaults.csproj" />
+    <ProjectReference Include="..\Shorty.Core\Shorty.Core.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -14,5 +15,9 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Persistence/Migrations/*.sql" />
+  </ItemGroup>
 
 </Project>

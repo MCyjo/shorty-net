@@ -12,7 +12,11 @@ public sealed class HealthEndpointTests : IDisposable
 {
     private readonly WebApplicationFactory<Program> _factory = new WebApplicationFactory<Program>()
         .WithWebHostBuilder(b => b
+            // WebApplicationFactory defaults to Development, which migrates the database at startup. These tests keep the
+            // dependencies unreachable on purpose, so they run as in the cloud: Production, no migration.
+            .UseEnvironment("Production")
             .UseSetting("OTEL_SDK_DISABLED", "true")
+            .UseSetting("CodeGeneration:Seed", "1")
             // Nothing listens on port 1; short timeouts keep the test fast.
             .UseSetting("ConnectionStrings:Postgres", "Host=127.0.0.1;Port=1;Database=x;Username=x;Password=x;Timeout=1")
             .UseSetting("ConnectionStrings:Redis", "127.0.0.1:1,abortConnect=false,connectTimeout=500,syncTimeout=500"));
